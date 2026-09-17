@@ -1,0 +1,11 @@
+.gradle/
+build/
+.idea/
+*.iml
+test/manual/classes/
+harness_out*.txt
+chan.txt
+
+# Smoke 测试含硬编码测试凭据，不入库（harness 凭据走命令行参数）
+test/Smoke*.java
+test/manual/probe_test.java

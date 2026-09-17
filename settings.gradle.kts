@@ -1,0 +1,1 @@
+rootProject.name = "cool-request-tool-rabbitmq"

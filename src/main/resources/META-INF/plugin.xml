@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin>
+    <id>com.coolrequest.tool.rabbitmq</id>
+    <name>RabbitMQ</name>
+    <vendor>cool-request-tools</vendor>
+    <description><![CDATA[
+        RabbitMQ client tool for Cool Request: manage connections, produce and consume messages.
+    ]]></description>
+    <depends>com.intellij.modules.platform</depends>
+    <since-build>252</since-build>
+    <resource-bundle>messages.MyMessageBundle</resource-bundle>
+</idea-plugin>
