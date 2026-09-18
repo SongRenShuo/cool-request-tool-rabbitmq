@@ -32,6 +32,17 @@
 手动模式下在途未确认数受 `Prefetch` 限制（默认 10）：确认一条，broker 补投下一条。
 如需一次看更多，把 Prefetch 调大或设为 0（不限流，注意大积压队列的内存占用）。
 
+### 4. 队列深度读数 + 手动刷新（补充项，用户提议）
+
+确认操作是否生效、队列还剩多少，表格本身看不出来（表格只显示已投递到本端的历史），故顶部行新增：
+
+- `Ready:` 数值标签 + `Refresh` 按钮：经 AMQP `queueDeclarePassive().getMessageCount()` 取**即时**可投递条数；
+  订阅中每 2 秒自动刷新（EDT 定时器，RPC 在后台线程），Ack/Requeue/Reject 后立即刷新一次；
+  未订阅时也能点 Refresh（临时开连接探测后即关）。
+- 未订阅/队列名为空显示 `—`，探测失败显示 `N/A`（不弹错，避免定时刷新刷屏）。
+- **不显示在途未确认数**：AMQP 协议不提供该读数，管理 API 有统计发布延迟（新声明队列的
+  `messages_ready`/`messages_unacknowledged` 字段直接缺失），故只报 ready 并在 tooltip 说明。
+
 ## 二、实现要点
 
 - 行状态需与表格行严格对齐：新增 `rowTags`（`Long`）、`rowStates`（`String`）两个与 `rowBodies` 平行的列表；

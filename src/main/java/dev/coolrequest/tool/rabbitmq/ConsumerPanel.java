@@ -46,6 +46,10 @@ public class ConsumerPanel extends JPanel {
     private final JButton ackButton;
     private final JButton requeueButton;
     private final JButton rejectButton;
+    private final JBLabel depthLabel;
+    private final JButton refreshButton;
+    /** 订阅中每 2 秒刷新队列深度（EDT 定时器，实际 RPC 在后台线程） */
+    private final javax.swing.Timer depthTimer;
     private final JBTable messageTable;
     private final DefaultTableModel tableModel;
     /** 与表格行一一对应的原始 body；add 于底部、limit 超限移除头部，避免行号随 removeRow 错位 */
@@ -87,6 +91,20 @@ public class ConsumerPanel extends JPanel {
         gbc.gridx = 3; gbc.weightx = 0.6;
         consumerPrefixField = new JBTextField("CoolRequest-");
         topRow.add(consumerPrefixField, gbc);
+
+        // 队列即时深度（ready）+ 手动刷新：确认/退回后一眼看出队列余量与操作是否生效
+        gbc.gridx = 4; gbc.weightx = 0;
+        topRow.add(new JBLabel("Ready:"), gbc);
+        gbc.gridx = 5; gbc.weightx = 0;
+        depthLabel = new JBLabel("—");
+        depthLabel.setToolTipText("队列当前可投递消息数（AMQP queueDeclarePassive 即时读数）；"
+                + "订阅中每 2 秒自动刷新。在途未确认数 AMQP 不提供，需管理 API 查询。");
+        topRow.add(depthLabel, gbc);
+        gbc.gridx = 6; gbc.weightx = 0;
+        refreshButton = new JButton("Refresh");
+        refreshButton.setToolTipText("立即重新读取队列深度");
+        refreshButton.addActionListener(e -> refreshQueueDepth());
+        topRow.add(refreshButton, gbc);
 
         // Table columns
         String[] columns = {"Time", "DeliveryTag", "Ack", "RoutingKey", "Size", "Body"};
@@ -189,6 +207,9 @@ public class ConsumerPanel extends JPanel {
 
         JBScrollPane tableScroll = new JBScrollPane(messageTable);
         add(tableScroll, BorderLayout.CENTER);
+
+        depthTimer = new javax.swing.Timer(2000, e -> refreshQueueDepth());
+        depthTimer.setRepeats(true);
     }
 
     public void onConnectionChanged(RabbitConnection conn) {
@@ -265,6 +286,8 @@ public class ConsumerPanel extends JPanel {
                     rowTags.clear();
                     rowStates.clear();
                     updateAckButtons();
+                    depthTimer.start();
+                    refreshQueueDepth();
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
@@ -380,6 +403,7 @@ public class ConsumerPanel extends JPanel {
                     }
                 }
                 updateAckButtons();
+                refreshQueueDepth();
                 if (failMsg != null) {
                     JOptionPane.showMessageDialog(this, "确认操作失败：\n" + failMsg, "Error", JOptionPane.ERROR_MESSAGE);
                 }
@@ -391,6 +415,37 @@ public class ConsumerPanel extends JPanel {
         boolean manual = !autoAckCheck.isSelected();
         boolean hasSelection = messageTable != null && messageTable.getSelectedRowCount() > 0;
         setAckButtonsEnabled(manual && hasSelection && running.get());
+    }
+
+    /** 读取队列即时深度（ready）。订阅中复用消费连接，未订阅时临时开一条连接后关闭。 */
+    private void refreshQueueDepth() {
+        RabbitConnection conn = connectionManager.getSelected();
+        String queue = queueField.getText().trim();
+        if (conn == null || queue.isEmpty()) {
+            depthLabel.setText("—");
+            return;
+        }
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            String text;
+            try {
+                Connection c = connection;
+                boolean own = c == null || !c.isOpen();
+                if (own) {
+                    c = openConnection(conn);
+                }
+                Channel probe = c.createChannel();
+                int ready = probe.queueDeclarePassive(queue).getMessageCount();
+                probe.close();
+                if (own) {
+                    c.close();
+                }
+                text = String.valueOf(ready);
+            } catch (Exception ex) {
+                text = "N/A";
+            }
+            final String value = text;
+            SwingUtilities.invokeLater(() -> depthLabel.setText(value));
+        });
     }
 
     private void setAckButtonsEnabled(boolean enabled) {
@@ -430,10 +485,12 @@ public class ConsumerPanel extends JPanel {
         }
         setFieldsEnabled(true);
         subscribeButton.setText("Subscribe");
+        depthTimer.stop();
         updateAckButtons();
     }
 
     public void dispose() {
+        depthTimer.stop();
         stopConsumer();
     }
 
