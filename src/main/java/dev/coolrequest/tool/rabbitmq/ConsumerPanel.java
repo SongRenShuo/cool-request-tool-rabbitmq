@@ -39,13 +39,21 @@ public class ConsumerPanel extends JPanel {
     private final ComboBox<Integer> limitComboBox;
     private final ComboBox<Integer> prefetchComboBox;
     private final JBCheckBox autoDeclareCheck;
+    private final JBCheckBox autoAckCheck;
     private final ComboBox<String> decodeCombo;
     private final JButton subscribeButton;
     private final JButton clearButton;
+    private final JButton ackButton;
+    private final JButton requeueButton;
+    private final JButton rejectButton;
     private final JBTable messageTable;
     private final DefaultTableModel tableModel;
     /** 与表格行一一对应的原始 body；add 于底部、limit 超限移除头部，避免行号随 removeRow 错位 */
     private final java.util.List<byte[]> rowBodies = new java.util.ArrayList<>();
+    /** 与表格行一一对应的 delivery tag（手动确认用；-1 表示该行不可确认） */
+    private final java.util.List<Long> rowTags = new java.util.ArrayList<>();
+    /** 与表格行一一对应的确认状态：Unacked / Acked / Requeued / Rejected / Auto */
+    private final java.util.List<String> rowStates = new java.util.ArrayList<>();
 
     private volatile Connection connection;
     private volatile Channel consumeChannel;
@@ -81,7 +89,7 @@ public class ConsumerPanel extends JPanel {
         topRow.add(consumerPrefixField, gbc);
 
         // Table columns
-        String[] columns = {"Time", "DeliveryTag", "RoutingKey", "Size", "Body"};
+        String[] columns = {"Time", "DeliveryTag", "Ack", "RoutingKey", "Size", "Body"};
         tableModel = new DefaultTableModel(columns, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -108,10 +116,38 @@ public class ConsumerPanel extends JPanel {
         autoDeclareCheck = new JBCheckBox("Auto-declare", true);
         controlRow.add(autoDeclareCheck);
 
+        autoAckCheck = new JBCheckBox("Auto ack", false);
+        autoAckCheck.setToolTipText("勾选后消息投递即确认（立刻从队列删除，不可恢复）；"
+                + "不勾选为手动确认：用 Ack / Requeue / Reject 处理选中行");
+        autoAckCheck.addActionListener(e -> {
+            boolean auto = autoAckCheck.isSelected();
+            prefetchComboBox.setEnabled(!auto && !running.get());
+            updateAckButtons();
+        });
+        controlRow.add(autoAckCheck);
+
+        ackButton = new JButton("Ack");
+        ackButton.setToolTipText("确认选中行：消息从队列删除");
+        ackButton.addActionListener(e -> settleSelected(Settle.ACK));
+        controlRow.add(ackButton);
+
+        requeueButton = new JButton("Requeue");
+        requeueButton.setToolTipText("退回选中行：消息回到队列并重投（标记 redeliver）");
+        requeueButton.addActionListener(e -> settleSelected(Settle.REQUEUE));
+        controlRow.add(requeueButton);
+
+        rejectButton = new JButton("Reject");
+        rejectButton.setToolTipText("拒绝选中行：消息丢弃（未配置死信队列时不进 DLX）");
+        rejectButton.addActionListener(e -> settleSelected(Settle.REJECT));
+        controlRow.add(rejectButton);
+
         clearButton = new JButton("Clear");
         clearButton.addActionListener(e -> {
             tableModel.setRowCount(0);
             rowBodies.clear();
+            rowTags.clear();
+            rowStates.clear();
+            updateAckButtons();
         });
         controlRow.add(clearButton);
 
@@ -126,11 +162,18 @@ public class ConsumerPanel extends JPanel {
 
         messageTable = new JBTable(tableModel);
         messageTable.setRowHeight(40);
+        messageTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         messageTable.getColumnModel().getColumn(0).setPreferredWidth(140);
         messageTable.getColumnModel().getColumn(1).setPreferredWidth(90);
-        messageTable.getColumnModel().getColumn(2).setPreferredWidth(160);
-        messageTable.getColumnModel().getColumn(3).setPreferredWidth(60);
-        messageTable.getColumnModel().getColumn(4).setPreferredWidth(340);
+        messageTable.getColumnModel().getColumn(2).setPreferredWidth(80);
+        messageTable.getColumnModel().getColumn(3).setPreferredWidth(160);
+        messageTable.getColumnModel().getColumn(4).setPreferredWidth(60);
+        messageTable.getColumnModel().getColumn(5).setPreferredWidth(340);
+        messageTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                updateAckButtons();
+            }
+        });
 
         messageTable.addMouseListener(new MouseAdapter() {
             @Override
@@ -172,6 +215,7 @@ public class ConsumerPanel extends JPanel {
             consumerPrefix = "CoolRequest-";
         }
         int prefetch = (Integer) prefetchComboBox.getSelectedItem();
+        boolean autoAck = autoAckCheck.isSelected();
         int decodeMode = decodeMode();
 
         if (queue.isEmpty()) {
@@ -197,7 +241,7 @@ public class ConsumerPanel extends JPanel {
                 this.connection = conn2;
                 Channel channel = conn2.createChannel();
                 this.consumeChannel = channel;
-                if (prefetch > 0) {
+                if (!autoAck && prefetch > 0) {
                     channel.basicQos(prefetch);
                 }
                 String declaredQueue = queue;
@@ -210,13 +254,17 @@ public class ConsumerPanel extends JPanel {
                 DefaultConsumer consumer = new DefaultConsumer(channel) {
                     @Override
                     public void handleDelivery(String tag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) {
-                        receive(envelope, properties, body, finalMode);
+                        receive(envelope, properties, body, finalMode, autoAck);
                     }
                 };
-                String tagName = channel.basicConsume(declaredQueue, false, prefixForThread + "-" + System.currentTimeMillis(), false, false, null, consumer);
+                String tagName = channel.basicConsume(declaredQueue, autoAck, prefixForThread + "-" + System.currentTimeMillis(), false, false, null, consumer);
                 this.consumerTag = tagName;
                 SwingUtilities.invokeLater(() -> {
                     tableModel.setRowCount(0);
+                    rowBodies.clear();
+                    rowTags.clear();
+                    rowStates.clear();
+                    updateAckButtons();
                 });
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
@@ -229,13 +277,15 @@ public class ConsumerPanel extends JPanel {
         });
     }
 
-    private void receive(Envelope envelope, AMQP.BasicProperties properties, byte[] body, int decodeMode) {
+    private void receive(Envelope envelope, AMQP.BasicProperties properties, byte[] body, int decodeMode, boolean autoAck) {
         final String time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
         final String tag = envelope.getDeliveryTag() + (envelope.isRedeliver() ? " (redeliver)" : "");
         final String routingKey = envelope.getRoutingKey();
         final String exchange = envelope.getExchange();
         final int size = body == null ? 0 : body.length;
         final byte[] bodyBytes = body == null ? new byte[0] : body;
+        final long deliveryTag = envelope.getDeliveryTag();
+        final String state = autoAck ? "Auto" : "Unacked";
         String decoded;
         try {
             decoded = BodyCodec.decode(bodyBytes, decodeMode);
@@ -251,17 +301,109 @@ public class ConsumerPanel extends JPanel {
                 if (!rowBodies.isEmpty()) {
                     rowBodies.remove(0);
                 }
+                if (!rowTags.isEmpty()) {
+                    rowTags.remove(0);
+                }
+                if (!rowStates.isEmpty()) {
+                    rowStates.remove(0);
+                }
             }
-            tableModel.addRow(new Object[]{time, tag, routingKey, size, bodyPreview});
+            tableModel.addRow(new Object[]{time, tag, state, routingKey, size, bodyPreview});
             rowBodies.add(bodyBytes);
+            rowTags.add(deliveryTag);
+            rowStates.add(state);
         });
+    }
+
+    private enum Settle {
+        ACK, REQUEUE, REJECT
+    }
+
+    /** 对选中行逐条确认（tag 可能不连续，故逐条 single，不用 multiple）。 */
+    private void settleSelected(Settle action) {
+        int[] rows = messageTable.getSelectedRows();
+        if (rows.length == 0) {
+            return;
+        }
+        Channel ch = consumeChannel;
+        if (ch == null || !ch.isOpen()) {
+            JOptionPane.showMessageDialog(this, "未在订阅中或通道已关闭，无法确认。", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        // 收集 (行号, tag)，跳过已处于终态的行
+        java.util.List<int[]> targets = new java.util.ArrayList<>();
+        java.util.List<Long> tags = new java.util.ArrayList<>();
+        for (int row : rows) {
+            if (row < 0 || row >= rowTags.size()) {
+                continue;
+            }
+            String st = rowStates.get(row);
+            if (!"Unacked".equals(st)) {
+                continue;
+            }
+            targets.add(new int[]{row});
+            tags.add(rowTags.get(row));
+        }
+        if (tags.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "选中行没有待确认的消息（已确认/已退回/已拒绝或为 Auto ack 模式）。",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        setAckButtonsEnabled(false);
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            String fail = null;
+            java.util.List<Integer> doneRows = new java.util.ArrayList<>();
+            for (int i = 0; i < tags.size(); i++) {
+                long tagValue = tags.get(i);
+                int row = targets.get(i)[0];
+                try {
+                    if (action == Settle.ACK) {
+                        ch.basicAck(tagValue, false);
+                    } else if (action == Settle.REQUEUE) {
+                        ch.basicNack(tagValue, false, true);
+                    } else {
+                        ch.basicNack(tagValue, false, false);
+                    }
+                    doneRows.add(row);
+                } catch (Exception ex) {
+                    fail = AmqpErrors.describe(ex);
+                    break;
+                }
+            }
+            final String failMsg = fail;
+            SwingUtilities.invokeLater(() -> {
+                String newState = action == Settle.ACK ? "Acked" : (action == Settle.REQUEUE ? "Requeued" : "Rejected");
+                for (int row : doneRows) {
+                    if (row < rowStates.size()) {
+                        rowStates.set(row, newState);
+                        tableModel.setValueAt(newState, row, 2);
+                    }
+                }
+                updateAckButtons();
+                if (failMsg != null) {
+                    JOptionPane.showMessageDialog(this, "确认操作失败：\n" + failMsg, "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            });
+        });
+    }
+
+    private void updateAckButtons() {
+        boolean manual = !autoAckCheck.isSelected();
+        boolean hasSelection = messageTable != null && messageTable.getSelectedRowCount() > 0;
+        setAckButtonsEnabled(manual && hasSelection && running.get());
+    }
+
+    private void setAckButtonsEnabled(boolean enabled) {
+        ackButton.setEnabled(enabled);
+        requeueButton.setEnabled(enabled);
+        rejectButton.setEnabled(enabled);
     }
 
     private void openDetail(int row) {
         String time = (String) tableModel.getValueAt(row, 0);
         String deliveryTag = (String) tableModel.getValueAt(row, 1);
-        String routingKey = (String) tableModel.getValueAt(row, 2);
-        String size = String.valueOf(tableModel.getValueAt(row, 3));
+        String routingKey = (String) tableModel.getValueAt(row, 3);
+        String size = String.valueOf(tableModel.getValueAt(row, 4));
         byte[] body = row >= 0 && row < rowBodies.size() ? rowBodies.get(row) : null;
         new MessageDetailDialog(project, time, deliveryTag, routingKey, size, body, queueField.getText().trim()).show();
     }
@@ -288,6 +430,7 @@ public class ConsumerPanel extends JPanel {
         }
         setFieldsEnabled(true);
         subscribeButton.setText("Subscribe");
+        updateAckButtons();
     }
 
     public void dispose() {
@@ -297,10 +440,11 @@ public class ConsumerPanel extends JPanel {
     private void setFieldsEnabled(boolean enabled) {
         queueField.setEnabled(enabled);
         consumerPrefixField.setEnabled(enabled);
-        prefetchComboBox.setEnabled(enabled);
+        prefetchComboBox.setEnabled(enabled && !autoAckCheck.isSelected());
         limitComboBox.setEnabled(enabled);
         decodeCombo.setEnabled(enabled);
         autoDeclareCheck.setEnabled(enabled);
+        autoAckCheck.setEnabled(enabled);
     }
 
     private int decodeMode() {
