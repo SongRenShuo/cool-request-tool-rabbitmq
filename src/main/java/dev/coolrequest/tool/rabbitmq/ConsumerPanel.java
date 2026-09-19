@@ -3,6 +3,9 @@ package dev.coolrequest.tool.rabbitmq;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
+import com.intellij.openapi.ui.popup.JBPopup;
+import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
@@ -115,24 +118,32 @@ public class ConsumerPanel extends JPanel {
             }
         };
 
-        // Second row: Limit, Prefetch, decode, Auto-declare, buttons
+        // Second row: 高频控件留主行（Decode/Auto ack/Ack/Subscribe/More），低频与配置类收进 More 弹出面板
         JPanel controlRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 4));
-        controlRow.add(new JBLabel("Prefetch:"));
         prefetchComboBox = new ComboBox<>(new Integer[]{0, 1, 10, 50, 100});
         prefetchComboBox.setSelectedItem(10);
-        controlRow.add(prefetchComboBox);
+        limitComboBox = new ComboBox<>(new Integer[]{10, 100, 500, 1000, 5000});
+        limitComboBox.setSelectedItem(200);
+        autoDeclareCheck = new JBCheckBox("Auto-declare", true);
+        requeueButton = new JButton("Requeue");
+        requeueButton.setToolTipText("退回选中行：消息回到队列并重投（标记 redeliver）");
+        requeueButton.addActionListener(e -> settleSelected(Settle.REQUEUE));
+        rejectButton = new JButton("Reject");
+        rejectButton.setToolTipText("拒绝选中行：消息丢弃（未配置死信队列时不进 DLX）");
+        rejectButton.addActionListener(e -> settleSelected(Settle.REJECT));
+        clearButton = new JButton("Clear");
+        clearButton.addActionListener(e -> {
+            tableModel.setRowCount(0);
+            rowBodies.clear();
+            rowTags.clear();
+            rowStates.clear();
+            updateAckButtons();
+        });
+
 
         controlRow.add(new JBLabel("Decode:"));
         decodeCombo = new ComboBox<>(new String[]{"JSON", "Text", "Hex"});
         controlRow.add(decodeCombo);
-
-        controlRow.add(new JBLabel("Limit:"));
-        limitComboBox = new ComboBox<>(new Integer[]{10, 100, 500, 1000, 5000});
-        limitComboBox.setSelectedItem(200);
-        controlRow.add(limitComboBox);
-
-        autoDeclareCheck = new JBCheckBox("Auto-declare", true);
-        controlRow.add(autoDeclareCheck);
 
         autoAckCheck = new JBCheckBox("Auto ack", false);
         autoAckCheck.setToolTipText("勾选后消息投递即确认（立刻从队列删除，不可恢复）；"
@@ -149,29 +160,48 @@ public class ConsumerPanel extends JPanel {
         ackButton.addActionListener(e -> settleSelected(Settle.ACK));
         controlRow.add(ackButton);
 
-        requeueButton = new JButton("Requeue");
-        requeueButton.setToolTipText("退回选中行：消息回到队列并重投（标记 redeliver）");
-        requeueButton.addActionListener(e -> settleSelected(Settle.REQUEUE));
-        controlRow.add(requeueButton);
-
-        rejectButton = new JButton("Reject");
-        rejectButton.setToolTipText("拒绝选中行：消息丢弃（未配置死信队列时不进 DLX）");
-        rejectButton.addActionListener(e -> settleSelected(Settle.REJECT));
-        controlRow.add(rejectButton);
-
-        clearButton = new JButton("Clear");
-        clearButton.addActionListener(e -> {
-            tableModel.setRowCount(0);
-            rowBodies.clear();
-            rowTags.clear();
-            rowStates.clear();
-            updateAckButtons();
-        });
-        controlRow.add(clearButton);
-
         subscribeButton = new JButton("Subscribe");
         subscribeButton.addActionListener(e -> toggleSubscription());
         controlRow.add(subscribeButton);
+
+        // --- More 弹出面板（同一组件实例从主行挪入，enablement 联动/ack 终态守卫照常生效） ---
+        JPanel morePanel = new JPanel(new GridBagLayout());
+        GridBagConstraints mgbc = new GridBagConstraints();
+        mgbc.insets = JBUI.insets(4, 8);
+        mgbc.anchor = GridBagConstraints.WEST;
+        mgbc.gridy = 0;
+        mgbc.gridx = 0;
+        morePanel.add(new JBLabel("Prefetch:"), mgbc);
+        mgbc.gridx = 1;
+        morePanel.add(prefetchComboBox, mgbc);
+        mgbc.gridx = 2;
+        morePanel.add(new JBLabel("Limit:"), mgbc);
+        mgbc.gridx = 3;
+        morePanel.add(limitComboBox, mgbc);
+        mgbc.gridy = 1;
+        mgbc.gridx = 0;
+        morePanel.add(autoDeclareCheck, mgbc);
+        mgbc.gridx = 1;
+        morePanel.add(requeueButton, mgbc);
+        mgbc.gridx = 2;
+        morePanel.add(rejectButton, mgbc);
+        mgbc.gridx = 3;
+        morePanel.add(clearButton, mgbc);
+
+        JButton moreButton = new JButton("More ▾");
+        moreButton.setToolTipText("Prefetch / Limit / Auto-declare / Requeue / Reject / Clear");
+        moreButton.addActionListener(e -> {
+            JBPopup popup = JBPopupFactory.getInstance()
+                    .createComponentPopupBuilder(morePanel, null)
+                    .setTitle("More")
+                    .setMovable(false)
+                    .setCancelOnClickOutside(true)
+                    .setCancelOnOtherWindowOpen(true)
+                    .createPopup();
+            popup.show(new RelativePoint(moreButton,
+                    new Point(moreButton.getWidth() / 2, moreButton.getHeight())));
+        });
+        controlRow.add(moreButton);
 
         JPanel northPanel = new JPanel(new BorderLayout());
         northPanel.add(topRow, BorderLayout.NORTH);

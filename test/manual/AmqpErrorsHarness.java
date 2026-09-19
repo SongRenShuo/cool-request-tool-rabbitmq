@@ -223,6 +223,8 @@ public class AmqpErrorsHarness {
         });
 
         System.out.println("\n==== 全部场景执行完毕 ====");
+        // amqp 消费线程池非 daemon 会挂住 JVM（曾因占用产物 jar 导致后续构建报 Device or resource busy）
+        System.exit(0);
     }
 
     /**

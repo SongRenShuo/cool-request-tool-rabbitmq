@@ -19,7 +19,7 @@ mkdir -p "$OUT" "$PKG" build/libs
 
 # --- 编译 classpath: 字面通配 IDE lib/*（javac 自展开，避免超长）+ SDK + amqp + slf4j ---
 IDEA_LIB=$(cygpath -m "$IDEA_DIR/lib")
-CP="$IDEA_LIB/*;$(cygpath -m "$(pwd)/lib/coolrequest-tool-1.0-SNAPSHOT.jar");$(cygpath -m "$(pwd)/lib/amqp-client-5.21.0.jar");$(cygpath -m "$(pwd)/lib/slf4j-api-1.7.36.jar")"
+CP="$IDEA_LIB/*;$(cygpath -m "$(pwd)/lib/coolrequest-tool-1.0-SNAPSHOT.jar");$(cygpath -m "$(pwd)/lib/amqp-client-5.21.0.jar");$(cygpath -m "$(pwd)/lib/slf4j-api-1.7.36.jar");$(cygpath -m "$IDEA_DIR/plugins/json/lib/intellij.json.jar")"
 
 "$JAVAC" --release 17 -classpath "$CP" -d "$OUT" src/main/java/dev/coolrequest/tool/rabbitmq/*.java
 
@@ -31,7 +31,8 @@ cp src/main/resources/coolrequest.tool src/main/resources/tool.name src/main/res
 
 # --- fat jar: 平铺第三方依赖 + 自身类/资源 ---
 cp -r "$OUT/." "$PKG/"
-for j in "$(pwd)"/lib/amqp-client-5.21.0.jar "$(pwd)"/lib/slf4j-api-1.7.36.jar; do
+for j in "$(pwd)"/lib/amqp-client-5.21.0.jar "$(pwd)"/lib/slf4j-api-1.7.36.jar \
+         "$(pwd)"/lib/jackson-core-2.15.0.jar "$(pwd)"/lib/jackson-databind-2.15.0.jar "$(pwd)"/lib/jackson-annotations-2.20.jar; do
   unzip -q -o "$j" -d "$PKG"
 done
 
