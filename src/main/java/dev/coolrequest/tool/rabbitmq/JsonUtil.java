@@ -10,7 +10,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 public final class JsonUtil {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     private JsonUtil() {
     }
