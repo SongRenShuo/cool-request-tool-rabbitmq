@@ -45,9 +45,9 @@ bash build-tool.sh                                  # 构建 fat jar
 export MSYS2_ARG_CONV_EXCL="*"
 JBR="C:/Users/USER/AppData/Local/Programs/IntelliJ IDEA/jbr"
 DEPS=$(ls lib/*.jar | tr '\n' ';')
-"$JBR/bin/javac.exe" --release 17 -encoding UTF-8 -cp "build/libs/cool-request-tool-rabbitmq-1.0-SNAPSHOT.jar;$DEPS" \
+"$JBR/bin/javac.exe" --release 17 -encoding UTF-8 -cp "build/libs/cool-request-tool-rabbitmq-1.1.0.jar;$DEPS" \
   -d test/manual/classes test/manual/AmqpErrorsHarness.java
-"$JBR/bin/java.exe" -cp "build/libs/cool-request-tool-rabbitmq-1.0-SNAPSHOT.jar;test/manual/classes;$DEPS" \
+"$JBR/bin/java.exe" -cp "build/libs/cool-request-tool-rabbitmq-1.1.0.jar;test/manual/classes;$DEPS" \
   AmqpErrorsHarness <host> <port> <vhost> <user> <password>   # 全绿再走下一步
 git add -A && git commit -m "..." && git push
 ```
@@ -63,7 +63,7 @@ cd $UP && git checkout rabbitmq-tool
 git checkout rabbitmq-dev -- src lib build-tool.sh build-tool.bat README.md
 #   ↑ 若未配 remote，先执行一次：
 #   git remote add rabbitmq-dev $DEV && git fetch rabbitmq-dev
-cp $DEV/build/libs/cool-request-tool-rabbitmq-1.0-SNAPSHOT.jar tools-rep/rabbitmq/
+cp $DEV/build/libs/cool-request-tool-rabbitmq-1.1.0.jar tools-rep/rabbitmq/
 cp $DEV/test/manual/AmqpErrorsHarness.java tools-rep/rabbitmq/test/manual/   # 凭据走参数版，可入库
 
 git add -A && git commit -m "fix/feat: 中文描述"
@@ -82,7 +82,7 @@ git -c http.proxy=http://127.0.0.1:7890 push \
 - [ ] **凭据终检**：`git -C $UP grep -E "bxGyxEy|114\.66\.55" -- tools-rep/rabbitmq` 零命中（Smoke\*/probe_test 永不进镜像）
 - [ ] jar 已用最新构建刷新（镜像根目录与本仓库 `build/libs/` 一致）
 - [ ] commit 信息中文
-- [ ] 版本号保持 `1.0-SNAPSHOT` 不动（生态定例，升级走商店后台 checksum/minVersion）
+- [ ] 版本号保持 `1.1.0` 不动（生态定例，升级走商店后台 checksum/minVersion）
 - [ ] 测试服务器 `cr.ui.*` 种子用完即清（管理 API 20071 清点复核）
 
 ## 已知平台坑速查

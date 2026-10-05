@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 轻量构建：用本机 IDEA lib 作编译 classpath，编译 src，再平铺合并第三方依赖为单 fat jar。
-# 产出：build/libs/cool-request-tool-rabbitmq-1.0-SNAPSHOT.jar
+# 产出：build/libs/cool-request-tool-rabbitmq-1.1.0.jar
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -42,13 +42,13 @@ rm -rf "$PKG"/com/intellij "$PKG"/dev/coolrequest/tool/CoolToolPanel.class "$PKG
 # 打包
 cd "$PKG"
 "$JAVA" -jar "$JDK_HOME"/lib/jrt-fs.jar >/dev/null 2>&1 || true  # no-op
-jar cf "$(pwd)/../libs/cool-request-tool-rabbitmq-1.0-SNAPSHOT.jar" .
+jar cf "$(pwd)/../libs/cool-request-tool-rabbitmq-1.1.0.jar" .
 cd ../..
 
 echo ""
 echo "=== 产物 ==="
 ls -la build/libs/
 echo "=== 根目录三资源校验 ==="
-unzip -l build/libs/cool-request-tool-rabbitmq-1.0-SNAPSHOT.jar | grep -E "coolrequest.tool|tool.name|logo.svg"
+unzip -l build/libs/cool-request-tool-rabbitmq-1.1.0.jar | grep -E "coolrequest.tool|tool.name|logo.svg"
 echo "=== 关键类 ==="
-unzip -l build/libs/cool-request-tool-rabbitmq-1.0-SNAPSHOT.jar | grep -E "rabbitmq/(RabbitMQToolFactory|RabbitMQMainPanel|ConsumerPanel)\.class|com/rabbitmq/client/ConnectionFactory.class"
+unzip -l build/libs/cool-request-tool-rabbitmq-1.1.0.jar | grep -E "rabbitmq/(RabbitMQToolFactory|RabbitMQMainPanel|ConsumerPanel)\.class|com/rabbitmq/client/ConnectionFactory.class"
